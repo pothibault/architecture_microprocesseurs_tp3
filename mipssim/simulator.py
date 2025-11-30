@@ -35,6 +35,8 @@ class Simulator:
         self.ROB = components.ROB(maxlen=24)
         self.PC = -1 #Puisqu'on incrémente avant le premier lancement
         self.RS = OrderedDict()
+        self.lancements = 1
+        self.sanctions = 1
 
         self.debug = debug
 
@@ -84,27 +86,39 @@ class Simulator:
         # instruction dans un seul coup d'horloge.
 
         #On sanctionne l'instruction via le ROB ( Premier élément de celui-ci )
-        self.commit()
+        committed = 0
+        while committed < self.sanctions:
+            if not self.commit():
+                break
+            committed += 1
 
         #Décrémentation du temps sur les unités fonctionnelles
         self.decrement_time()
 
-        # Gestion des bulles et de la fin du programme
-        if self.stall == True or (self.new_PC == None and self.PC + 1 == len(self.instructions)):
-            print('Aucune instruction lancée (clock: %i).' % self.clock)
-        elif self.new_PC == len(self.instructions):
-            #Le programme va terminer son exécution dès que le ROB sera vide.
-            self.PC = self.new_PC
-        else:
-            #Avancement du Issue/Program Counter (PC)
-            if self.new_PC != None: #Si branchement
-                self.PC = self.new_PC
-            else:
-                self.PC = self.PC + 1
-            self.new_PC = None
+        issued = 0
 
-            #Lance l'instruction à self.PC
-            self.issue()
+        while issued < self.lancements:
+            # Gestion des bulles et de la fin du programme
+            if self.stall == True or (self.new_PC == None and self.PC + 1 == len(self.instructions)):
+                break
+            elif self.new_PC == len(self.instructions):
+                #Le programme va terminer son exécution dès que le ROB sera vide.
+                self.PC = self.new_PC
+                break
+            else:
+                #Avancement du Issue/Program Counter (PC)
+                if self.new_PC != None: #Si branchement
+                    self.PC = self.new_PC
+                else:
+                    self.PC = self.PC + 1
+                self.new_PC = None
+
+                old_PC = self.PC
+                self.issue()
+                issued += 1
+
+        if issued == 0:
+            print('Aucune instruction lancée (clock: %i).' % self.clock)
 
         #Mise à jour de la trace
         for t in self.trace:
@@ -121,11 +135,16 @@ class Simulator:
         Sanctionne les opérations dont le calcul est terminé dans l'ordre de lancement.
         Seule l'instruction à la tête du ROB peut être sanctionnée.
         '''
+        if len(self.ROB) == 0:
+            return False
+
         rob_head = self.ROB[self.ROB.start]
 
         #Petit hack pour pouvoir visualiser la dernière entrée à avoir été sanctionnée
         if rob_head.state == State.COMMIT:
             self.ROB.free_head_entry()
+            if len(self.ROB) == 0:
+                return False
             rob_head = self.ROB[self.ROB.start]
 
         if len(self.ROB) > 0 and rob_head.state == State.WRITE and rob_head.ready:
@@ -172,6 +191,9 @@ class Simulator:
 
             # Une fois l'instruction sanctionnée, on la conserve pendant un coup d'horloge
             rob_head.state = State.COMMIT
+            return True
+        
+        return False
 
     def exec_instr(self, func_unit, rob_entry):
         '''
@@ -585,6 +607,15 @@ class Simulator:
          additional_defaults={'div_latency': 1})
         self.RS['ALU'] = create_functional_units(xml_data, 'ALU', 1, 1)
         self.RS['Branch'] = create_functional_units(xml_data, 'Branch', 1, 1)
+
+        #Lancements et sanctions
+        root = xml_data.getElementsByTagName('MIPSSim')[0]
+
+        lancements = root.getAttribute('lancements')
+        sanctions = root.getAttribute('sanctions')
+
+        self.lancements = int(lancements) if lancements else 1
+        self.sanctions = int(sanctions) if sanctions else 1
 
         # Attribution des registres
         register_nodes = xml_data.getElementsByTagName('Registers')[0].childNodes

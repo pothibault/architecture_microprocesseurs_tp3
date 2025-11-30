@@ -1,4 +1,4 @@
-<MIPSSim>
+<MIPSSim lancements="1" sanctions="1">
   <FunctUnits>
     <Load   number="2" latency="4"/>
     <Store  number="2" latency="8"/>
